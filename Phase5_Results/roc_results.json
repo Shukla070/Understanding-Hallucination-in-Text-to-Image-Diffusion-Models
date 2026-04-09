@@ -1,0 +1,38 @@
+{
+  "overall": {
+    "auc_variance": 0.876583,
+    "auc_clip": 0.872468,
+    "auc_combined": 0.897864,
+    "cv_auc_mean": 0.896248,
+    "cv_auc_std": 0.047848,
+    "lr_coef_variance": 0.526057,
+    "lr_coef_clip": -1.416832
+  },
+  "per_category": {
+    "Ambiguous": {
+      "var": null,
+      "clip": null,
+      "comb": null
+    },
+    "Compositional": {
+      "var": 0.94272,
+      "clip": 0.915731,
+      "comb": 0.962573
+    },
+    "Conflicting": {
+      "var": null,
+      "clip": null,
+      "comb": null
+    },
+    "Negation": {
+      "var": 0.98269,
+      "clip": 0.915471,
+      "comb": 0.965539
+    },
+    "Single-Concept": {
+      "var": 0.923904,
+      "clip": 0.957359,
+      "comb": 0.961377
+    }
+  }
+}

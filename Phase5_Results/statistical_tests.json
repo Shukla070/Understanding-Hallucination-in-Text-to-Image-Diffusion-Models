@@ -1,0 +1,44 @@
+{
+  "spearman": {
+    "var_vs_cfg_all": {
+      "rho": -0.4136,
+      "p": 0.0
+    },
+    "var_vs_cfg_low": {
+      "rho": -0.6235,
+      "p": 0.0
+    },
+    "var_vs_cfg_high": {
+      "rho": 0.144,
+      "p": 0.0
+    },
+    "clip_vs_cfg_all": {
+      "rho": 0.6204,
+      "p": 0.0
+    }
+  },
+  "mann_whitney": {
+    "variance": {
+      "U": 3233297.0,
+      "p": 0.0,
+      "effect_r": -0.7532,
+      "label": "Large"
+    },
+    "clip": {
+      "U": 3218121.0,
+      "p": 0.0,
+      "effect_r": -0.7449
+    }
+  },
+  "chi_squared": {
+    "chi2": 563.5907,
+    "df": 4,
+    "p": 0.0,
+    "cramers_v": 0.2837
+  },
+  "cohens_d_variance": {
+    "d": 0.8191,
+    "label": "Large",
+    "pooled_std": 0.00092046
+  }
+}
