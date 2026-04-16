@@ -1,0 +1,56 @@
+{
+  "dataset": {
+    "n_images": 10000,
+    "n_prompts": 200,
+    "n_seeds": 50,
+    "cfg": 7.5,
+    "hallucinated": 97,
+    "hall_rate_pct": 0.97
+  },
+  "variance_stats": {
+    "mean": 0.0027540724394813877,
+    "std": 0.0006255651263674596,
+    "min": 0.00034895152202807367,
+    "max": 0.008367905393242836,
+    "phase3_mean_cfg7.5": 0.002732
+  },
+  "clip_stats": {
+    "mean": 0.24061810069829226,
+    "std": 0.03198188815901083,
+    "phase3_mean_cfg7.5": 0.2401
+  },
+  "auc_results": {
+    "internal_variance_auc": 0.8765828824754834,
+    "internal_clip_auc": 0.8724684995949599,
+    "internal_combined_auc": 0.8978637525470893,
+    "external_variance_auc": 0.958456825017099,
+    "external_clip_auc": 0.4750820068062266,
+    "external_combined_auc": 0.9603546150234595,
+    "external_combined_cv": "0.9377\u00b10.0321",
+    "variance_drop": -0.08187394254161551,
+    "combined_drop": -0.06249086247637026
+  },
+  "statistical_tests": {
+    "mannwhitney_p": 6.3395338706585326e-55,
+    "effect_r": 0.156088233993142,
+    "cohens_d": 1.8791023508511118,
+    "phase3_cohens_d": 0.82
+  },
+  "per_category_auc": {
+    "Single-Concept": {
+      "var": 0.9597161493799727,
+      "clip": 0.6899147014550928,
+      "combined": 0.9366353666403842
+    },
+    "Compositional": {
+      "var": 0.9777708269650461,
+      "clip": 0.6019861947380768,
+      "combined": 0.9779911993232436
+    },
+    "Negation": {
+      "var": 0.9858270361041142,
+      "clip": 0.7472040302267002,
+      "combined": 0.9791435768261965
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "spatial_concentration": {
+    "hall_sci_mean": 0.38578280080301885,
+    "clean_sci_mean": 0.43576390734450543,
+    "geo_sci_mean": 0.4860496636454153,
+    "cohens_d": -1.0135740515429692,
+    "mannwhitney_p": 8.08420061542346e-147,
+    "effect_r": 0.30809098217686937
+  },
+  "peak_variance_ratio": {
+    "hall_pvr_mean": 3.332902170224472,
+    "clean_pvr_mean": 4.165310753864771,
+    "cohens_d": -0.7625047414656839,
+    "mannwhitney_p": 2.0558595397666102e-148,
+    "effect_r": 0.3097863401184635
+  },
+  "auc_comparison": {
+    "global_variance_auc": 0.8765828824754834,
+    "clip_score_auc": 0.8724684995949599,
+    "sci_gini_auc": 0.8241836029804875,
+    "peak_var_ratio_auc": 0.8259675143770244,
+    "spatial_max_auc": 0.42114406738305077,
+    "phase5_combined_auc": 0.8978637525470893,
+    "phase5_combined_cv": "0.8962\u00b10.0478",
+    "phase7_spatial_auc": 0.8994131527949933,
+    "phase7_spatial_cv": "0.9000\u00b10.0796",
+    "all_features_auc": 0.9258283259103098,
+    "all_features_cv": "0.9185\u00b10.0622"
+  },
+  "key_finding": "Hallucinated images show LOWER spatial concentration (SCI) than clean images. Mode interpolation produces uniform global variance spread, not localized hot-spots. Geometric-only images show HIGH localized variance (SCI~0.58), forming a distinct third pattern. Spatial features provide complementary but not superior AUC vs Phase 5."
+}
