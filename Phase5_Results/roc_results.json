@@ -9,17 +9,17 @@
     "lr_coef_clip": -1.416832
   },
   "per_category": {
-    "Ambiguous": {
-      "var": null,
-      "clip": null,
-      "comb": null
-    },
     "Compositional": {
       "var": 0.94272,
       "clip": 0.915731,
       "comb": 0.962573
     },
     "Conflicting": {
+      "var": null,
+      "clip": null,
+      "comb": null
+    },
+    "Generic": {
       "var": null,
       "clip": null,
       "comb": null

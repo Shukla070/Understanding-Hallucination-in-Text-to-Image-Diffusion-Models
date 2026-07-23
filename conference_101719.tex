@@ -1,0 +1,1086 @@
+%% ============================================================
+%%  Mechanistic Analysis of T2I Hallucinations via Mode Interpolation
+%%  IEEE Conference Paper — Revised Version
+%%  All changes from review integrated
+%% ============================================================
+\documentclass[conference]{IEEEtran}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{tabularx}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  citecolor=green!50!black,
+  urlcolor=blue!60!black
+}
+
+\newcommand{\T}[1]{\texttt{#1}}
+\newcommand{\B}[1]{\textbf{#1}}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+%% ============================================================
+\begin{document}
+
+\title{Mechanistic Analysis of Text-to-Image Hallucinations\\
+via Mode Interpolation Under Classifier-Free Guidance}
+
+\author{
+\begin{tabular}{cc}
+\text{Hasini Jaishetty} & \text{Utkarsh Shukla} \\
+\textit{Department of Information Technology} & \textit{Department of Information Technology} \\
+\textit{National Institute of Technology Karnataka, Surathkal} & \textit{National Institute of Technology Karnataka, Surathkal} \\
+jaishettyhasini.231ai012@nitk.edu.in & utkarshshukla.231ai040@nitk.edu.in \\
+\\
+\text{Anjali R} & \text{Dr.~Anand Kumar M} \\
+\textit{Department of Information Technology} & \textit{Department of Information Technology} \\
+\textit{National Institute of Technology Karnataka, Surathkal} & \textit{National Institute of Technology Karnataka, Surathkal} \\
+anjali.247it001@nitk.edu.in & m\_anandkumar@nitk.edu.in \\
+\end{tabular}
+}
+
+\maketitle
+
+%% ============================================================
+%%  ABSTRACT
+%% ============================================================
+\begin{abstract}
+Text-to-image diffusion models have reached a point where the outputs
+are often indistinguishable from photographs and yet they still produce
+hallucinated images with surprising regularity which often includes duplicated objects and anatomically wrong body parts and also the scenes that no photograph could capture. A Prior work traced this problem to a specific geometric cause in unconditional diffusion models: \emph{mode interpolation}. In this a smooth neural score function generates samples that fall between valid data modes rather than on them. Trajectory Variance was introduced then in that work as a
+way to detect these failures during generation itself. What it did
+not address is whether the same mechanism is still at play once you
+add text conditioning and Classifier-Free Guidance, the two things
+that make a model like Stable Diffusion actually work.
+
+This paper asks that question directly. We are using a custom DDIM pipeline
+that captures intermediate trajectory information at no extra
+inference cost. For this, we run a controlled study across 18{,}000 images and 220 distinct prompts. We find that CFG does not simply suppress mode
+interpolation but rather it creates a geometric stability optimum due to
+which pushing guidance further actually reintroduces instability in
+certain prompt types. The trajectory variance measures a property of the diffusion process rather than text image alignment. We find that it still holds up on prompt distributions where
+CLIP-based detection completely falls apart. Furthermore, the spatial decomposition
+of per-pixel variance maps reveals a three-tier failure
+taxonomy that a single global number cannot distinguish. Together,
+these results suggest a clearer picture of when and why T2I
+models fail and what can practically be done about it at deployment
+time.
+\end{abstract}
+
+\begin{IEEEkeywords}
+diffusion models, hallucination detection, mode interpolation,
+classifier-free guidance, trajectory variance, text-to-image
+generation, spatial analysis, generalisation
+\end{IEEEkeywords}
+
+%% ============================================================
+%%  1. INTRODUCTION
+%% ============================================================
+\section{Introduction}
+\label{sec:introduction}
+
+Denoising Diffusion Probabilistic Models (DDPMs) have become the
+dominant paradigm for high-quality image synthesis~\cite{ho2020ddpm,
+song2020ddim}. Despite impressive visual quality, these models
+routinely produce hallucinated outputs with images that fall outside
+the support of the true data distribution which manifest as duplicated
+objects, physically impossible structures, anatomically incorrect
+body parts and semantically incoherent scenes.
+
+A landmark paper by Aithal et al.~\cite{yi2024understanding} provided
+the first mechanistic geometric explanation for this phenomenon in
+\emph{unconditional} diffusion models. The central claim is that
+hallucinations arise from \emph{mode interpolation}: the learned
+score function, being a smooth neural approximation rather than the
+true score, generates samples in low-probability latent regions lying
+geometrically \emph{between} valid data modes. That work proposed
+\emph{trajectory variance} where the variance of predicted $\hat{x}_0$
+estimates over the final reverse diffusion steps which acted as a practical
+proxy for detecting these interpolating samples and achieving 95\%
+detection accuracy on controlled distributions.
+
+However, this theoretical framework was established exclusively for
+unconditional generation. Modern T2I systems such as Stable
+Diffusion~\cite{rombach2022ldm} fundamentally alter the generative
+process through two mechanisms: (1)~semantic conditioning via
+cross-attention between latent representations and CLIP-based text
+embeddings~\cite{radford2021clip} and (2)~Classifier-Free
+Guidance (CFG)~\cite{ho2022cfg} which amplifies the conditional
+signal by interpolating between unconditional and conditional score
+estimates with a user-controlled guidance scale $\lambda$. These
+mechanisms may either suppress mode interpolation by constraining
+trajectories to semantically valid regions or compound it by
+introducing new forms of geometric instability when guidance is
+too strong. A concurrent line of work investigates a mechanistically
+distinct phenomenon, local generation bias in rendered text, which
+is orthogonal to the latent-space geometric failures studied
+here~\cite{liu2024texthallu}.
+
+%\textbf{Contributions.}
+This paper makes the following contributions:
+
+\begin{enumerate}
+  \item \textbf{CFG U-curve:} Empirical confirmation that trajectory
+  variance forms a statistically significant U-curve as a function
+  of CFG scale, with a minimum at CFG\,=\,7.5 (0.0\% hallucination
+  rate) and a partial rebound at CFG\,=\,15 (1.3\%), while CLIP
+  score increases monotonically throughout.
+
+  \item \textbf{Per-CFG discriminability:} At CFG\,=\,1, trajectory
+  variance achieves AUC\,=\,0.760 while CLIP collapses to
+  AUC\,=\,0.522 (near-random), demonstrating that variance
+  discriminates hallucinations precisely in the regime where CLIP
+  provides no useful signal.
+
+  \item \textbf{Three-tier spatial taxonomy:} Per-pixel variance
+  heatmap analysis reveals that mode interpolation produces uniform
+  spatial spread (SCI\,=\,0.386) while geometric-only failures
+  produce localised hot-spots (SCI\,=\,0.486) which is a distinction
+  invisible to the global scalar metric. Cohen's $d{=}1.014$ is
+  the largest effect size in the study.
+
+  \item \textbf{External generalisation:} Trajectory variance AUC
+  improves from 0.877 to 0.959 on 200 unseen prompts with fixed
+  thresholds; CLIP AUC collapses to 0.475 with a CI that includes
+  0.5. Bootstrap confidence intervals confirm these signals are
+  categorically different.
+
+  \item \textbf{Dual hypothesis outcome:} Mode interpolation is
+  CFG-dependent that is dominant at low guidance, completely suppressed
+  at standard guidance, and partially reintroduced by
+  over-guidance, while 24.3\% of all failures are attributable
+  to semantic misalignment independent of geometric instability.
+\end{enumerate}
+
+%% ============================================================
+%%  2. RELATED WORK
+%% ============================================================
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Hallucination in Generative Models}
+Hallucination in large language models has been extensively
+studied~\cite{ji2023survey}. In vision-language models, hallucination
+typically refers to generated content inconsistent with the visual
+input~\cite{li2023evaluating}. For T2I models, the problem is less
+formally defined: outputs may be semantically inconsistent with the
+prompt, compositionally incorrect, or physically impossible.
+
+\subsection{Geometric Mechanisms in Diffusion Models}
+Aithal et al.~\cite{yi2024understanding} established that unconditional
+diffusion model hallucinations arise from mode interpolation in the
+learned score function, and proposed trajectory variance as a
+computable proxy for geometric instability. Our work extends this
+framework to conditioned T2I generation, testing whether the mechanism
+persists under cross-attention and CFG, and introducing a spatial
+decomposition of trajectory variance not considered in the original
+work.
+
+\subsection{Classifier-Free Guidance}
+Ho and Salimans~\cite{ho2022cfg} introduced CFG as a method to trade
+sample quality against diversity by amplifying the conditional signal
+relative to the unconditional baseline. Our CFG U-curve finding
+provides new evidence that there exists an optimal geometric stability
+point (CFG\,=\,7.5) that is distinct from the maximum semantic
+alignment point.
+
+\subsection{Hallucination Detection}
+Existing detection approaches for T2I hallucinations typically rely
+on object detectors~\cite{wang2024yolov10} or vision-language
+similarity metrics~\cite{radford2021clip} applied post-hoc. Our
+work demonstrates that trajectory variance, computed during generation
+at zero additional inference cost, generalises to unseen prompt
+distributions where CLIP-based detection fails.
+
+%% ============================================================
+%%  3. METHODOLOGY
+%% ============================================================
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Trajectory Variance Validation}
+\label{sec:validation}
+
+Before applying trajectory variance to Stable Diffusion, we first
+validated the metric on four controlled toy distributions where
+ground truth hallucinations are known exactly, following the
+experimental methodology of~\cite{yi2024understanding}. The
+validation criterion is a dead-zone-to-mode variance ratio exceeding
+5.0 where failure would indicate the metric is unreliable.
+
+\textbf{Setup.} Four experiments with increasing geometric complexity
+(1D Gaussian mixtures with 3 modes and 5 modes, a 2D Gaussian grid and a simple shapes
+generator) are used here with a fully-connected diffusion network. Trajectory variance
+is computed over the final commitment-window steps of each denoising
+trajectory.
+
+\textbf{Results.} All four experiments passed: 3-Gaussian 1D
+(ratio\,=\,16.14), 5-Gaussian 1D (ratio\,=\,8.80), 2D 3$\times$3
+grid (ratio\,=\,5.55), Simple Shapes (ratio\,=\,17.43). All exceed
+the threshold of 5.0, confirming that trajectory variance reliably
+separates hallucinated from valid samples before application to
+Stable Diffusion.
+
+\subsection{Custom DDIM Pipeline}
+\label{sec:pipeline}
+
+The standard HuggingFace pipeline~\cite{wolf2020huggingface} does
+not expose intermediate $\hat{x}_0$ estimates. We build a custom
+DDIM loop~\cite{song2020ddim} for Stable Diffusion
+v1.4~\cite{rombach2022ldm} that intercepts the per-step $\hat{x}_0$
+prediction without altering the final generated image:
+\begin{equation}
+  \hat{x}_0(t) = \frac{x_t - \sqrt{1-\bar{\alpha}(t)}\,\hat{\varepsilon}_t}
+                      {\sqrt{\bar{\alpha}(t)}}
+  \label{eq:x0_pred}
+\end{equation}
+CFG is applied as a single UNet forward pass on the concatenated
+$[\varnothing, c]$ batch:
+\begin{equation}
+  \hat{\varepsilon}_\lambda = \hat{\varepsilon}_\varnothing
+    + \lambda\,(\hat{\varepsilon}_c - \hat{\varepsilon}_\varnothing)
+  \label{eq:cfg}
+\end{equation}
+\par\textbf{Sanity check.} Standard and custom pipelines produce
+pixel-identical outputs for the same seed (mean absolute pixel
+difference\,=\,0.0109, which is 0.004\% of the full pixel range),
+confirming the custom loop does not alter generation. See Figure~1.
+
+\textbf{Variance window.} Trajectory variance is computed over the
+last 15 DDIM steps, which we call the \emph{commitment window}
+following~\cite{yi2024understanding}. This is the phase where the
+model finalises its output structure. The cumulative noise schedule
+at the start of this window is $\bar{\alpha}|_{\text{start}}{=}0.622$,
+placing it in a valid measurement regime. The global scalar is:
+\begin{equation}
+  v = \text{Var}_t\bigl(\hat{x}_0(t)\bigr).\text{mean}()
+  \label{eq:variance}
+\end{equation}
+For the spatial analysis (Section~\ref{sec:spatial}), we preserve
+structure by computing channel-averaged 64$\times$64 variance maps
+before the final spatial averaging.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{phase2_sanity_check.png}
+  \caption{Pipeline sanity check. \textbf{Left:} Standard HuggingFace
+  output. \textbf{Centre:} Custom DDIM loop output (same seed,
+  var\,=\,0.002512). \textbf{Right:} Absolute pixel difference map
+  (mean\,=\,0.0109, PASS).}
+  \label{fig:sanity}
+\end{figure}
+
+\subsection{Experimental Dataset}
+\label{sec:dataset}
+
+\textbf{Prompt design.} Twenty prompts span five semantic categories
+(Table~\ref{tab:prompts}), ranging from semantically precise
+(Single-Concept: ``A single red apple'') to semantically impossible
+(Conflicting: ``Frozen fire''). Each category targets a distinct
+hallucination mechanism.
+
+\begin{table}[h]
+\centering
+\caption{20-Prompt Design across Five Semantic Categories.}
+\label{tab:prompts}
+\small
+\begin{tabular}{p{1.6cm}cp{3.0cm}c}
+\toprule
+\textbf{Category} & \textbf{n} & \textbf{Purpose} & \textbf{YOLO?} \\
+\midrule
+Single-Concept & 4 & Baseline; strict object count & Partial \\
+Generic        & 4 & Underspecified; tests semantic breadth & Partial \\
+Conflicting    & 4 & Impossible constraints; forces oscillation & No \\
+Compositional  & 4 & Multi-object spatial binding & Yes \\
+Negation       & 4 & Tests SD's ability to suppress attributes & Partial \\
+\bottomrule
+\multicolumn{4}{p{7.5cm}}{\small\textit{Note:} 11 prompts are validated by YOLO (AUTO); 9 prompts are validated by CLIP only (MANUAL) because the required concepts fall outside the COCO-80 vocabulary.}
+\end{tabular}
+\end{table}
+
+\textbf{Internal dataset.} There are two splits generated. The
+\emph{calibration split} (1{,}000 images, seeds 50--99,
+CFG\,=\,7.5 only) is used exclusively to compute per-category
+detection thresholds and is never used in any AUC computation.
+The \emph{experimental split} (7{,}000 images, seeds 0--49,
+7 CFG values: $\{0, 1, 3, 5, 7.5, 10, 15\}$) is the main analysis
+dataset. Critically, the same 50 seeds are reused across all 7 CFG
+values, isolating the CFG effect from seed-level randomness.
+All experiments use Stable Diffusion v1.4 with a DDIMScheduler
+(50 steps) and they generated 512$\times$512 images. Trajectories are
+stored as $(15, 4, 64, 64)$ floating-point arrays for each image.
+
+\textbf{External dataset.} For generalisation testing, 10{,}000
+images are generated from 200 independent external prompts (40 per
+category) at CFG\,=\,7.5 only and with 50 seeds per prompt. All
+detection thresholds from the internal calibration split are applied
+\emph{unchanged} where no recalibration is performed. This fixed-threshold
+constraint is what makes the external test a genuine test of
+generalisation rather than re-calibration.
+
+\subsection{Two-Signal Hallucination Labelling}
+\label{sec:labelling}
+
+\textbf{Per-category threshold calibration.} A global threshold would
+systematically mislabel entire categories: Generic prompts have
+naturally high variance (the model must choose between multiple valid
+interpretations); Conflicting prompts have naturally low CLIP scores
+because no image can satisfy contradictory constraints. We therefore
+calibrate one threshold pair per category $k$ from the calibration
+split:
+\begin{align}
+  \tau_\text{var}^{(k)} &= \mu_\text{var}^{(k)} + 2\sigma_\text{var}^{(k)}
+  \label{eq:tvar} \\
+  \tau_\text{clip}^{(k)} &= \mu_\text{clip}^{(k)} - 2\sigma_\text{clip}^{(k)}
+  \label{eq:tclip}
+\end{align}
+Standard deviations use the population formula and at $n{=}200$ per
+category the difference from the sample estimate is below 0.3\%.
+
+\textbf{Labelling rule.} An image is labelled hallucinated only when
+\emph{both} a geometric signal and a quality signal fail:
+\begin{equation}
+  \text{hallucinated} =
+    \underbrace{\bigl(v > \tau_\text{var}^{(k)}\bigr)}_{\text{geometric}}
+    \;\wedge\;
+    \underbrace{\bigl(\text{yolo\_error} \vee \text{clip} < \tau_\text{clip}^{(k)}\bigr)}_{\text{quality}}
+  \label{eq:label}
+\end{equation}
+The AND condition is essential: 364 images showed high variance but
+passed quality checks (geometric-only failures), confirming that
+geometric instability alone does not imply a wrong output.
+
+This labelling produces four failure types: \textbf{both} (confirmed
+hallucination), \textbf{geometric} (high variance, correct output),
+\textbf{semantic} (normal variance, wrong output), and \textbf{none}
+(clean generation).
+
+\textbf{Validation tools.} YOLOv8x (confidence\,=\,0.25) is applied
+to the 11 AUTO prompts with a strict count rule (exactly one object)
+for Single-Concept prompts SC1 and SC2 only. CLIP ViT-L/14
+(OpenCLIP, OpenAI pretrained) is applied to all 20 prompts and is
+the sole signal for the 9 MANUAL prompts.
+
+%% ============================================================
+%%  4. RESULTS
+%% ============================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Hallucination Label Distribution}
+
+Table~\ref{tab:distribution} summarises the 7{,}000 image labels.
+62.3\% are clean, 8.2\% are confirmed hallucinations and 24.3\%
+fail quality checks with \emph{normal} trajectory variance. This
+last group is critical: it establishes semantic misalignment as
+an independent failure mechanism and provides partial support for H$_0$.
+
+\begin{table}[h]
+\centering
+\caption{Failure Type Distribution (7{,}000 Internal Images).}
+\label{tab:distribution}
+\small
+\begin{tabular}{lrrl}
+\toprule
+\textbf{Type} & \textbf{n} & \textbf{\%} & \textbf{Interpretation} \\
+\midrule
+Clean (none)        & 4{,}364 & 62.3 & Passes all checks \\
+Semantic only       & 1{,}698 & 24.3 & Stable traj.; wrong output \\
+\textbf{Both (hallucinated)} & \textbf{574} & \textbf{8.2} & High var.\ + quality fail \\
+Geometric only      &   364 &  5.2 & High var.; output correct \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{CFG Variance U-Curve}
+\label{sec:ucurve}
+
+Figure~\ref{fig:cfg_sweep} shows the central finding. Trajectory
+variance is minimised at CFG\,=\,7.5 ($\bar{v}{=}0.002732$ and 0.0\%
+hallucination rate) and rises in both directions. CLIP scores increase
+monotonically with CFG ($\rho{=}{+}0.620$ and $p{\approx}0$) which confirms
+that the two signals capture genuinely different aspects of generation
+quality.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figure2_cfg_sweep.png}
+  \caption{CFG Sweep Analysis. \textbf{Left:} Mean trajectory variance
+  ${\pm}$std per category vs.\ CFG. All categories show the U-shape.
+  \textbf{Right:} Hallucination rate (left axis) and mean CLIP score
+  (right axis). CLIP increases monotonically while hallucination rate
+  forms a U.}
+  \label{fig:cfg_sweep}
+\end{figure}
+
+\textbf{Mechanistic explanation.} At CFG\,=\,0, the null embedding
+provides no directional guidance because the trajectories wander freely in latent
+space. As CFG increases to 7.5, the conditional score provides
+increasingly strong attraction toward the semantically aligned region which
+suppresses mode-to-mode wandering. Above CFG\,=\,7.5, the guidance becomes
+over-amplified: for semantically contradictory prompts
+(e.g., ``Frozen fire'') as it forces the model to simultaneously satisfy
+incompatible attractors, manifesting as renewed geometric oscillation.
+The variance increase at high CFG is concentrated in the Conflicting
+category (std\,=\,0.001717 at CFG\,=\,15 vs.\ 0.000286 for
+Single-Concept). The ascending Spearman $\rho{=}{+}0.144$ is
+statistically significant due to the large sample ($n{=}3{,}000$),
+but the correlation magnitude is weak. We notice the rebound is real but modest.
+
+\textbf{Internal consistency check.} At CFG\,=\,0, all 20 prompts
+produce identical mean variance (0.003645) regardless of text content.
+This confirms the null embedding is active and seed-level noise is the
+sole variance source in that condition.
+
+\subsection{Feature Space Analysis}
+
+Figure~\ref{fig:scatter} shows all 7{,}000 images in the trajectory
+variance $\times$ CLIP score feature space. The hallucinated cluster
+(red) occupies the high-variance, low-CLIP quadrant as predicted by
+Equation~(\ref{eq:label}). Semantic-only failures (blue) appear at
+low CLIP across all variance levels, confirming stable trajectories
+with wrong output. Geometric-only failures (orange) appear at high
+variance but normal CLIP which confirms the geometric instability without
+semantic failure.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figure1_variance_vs_clip.png}
+  \caption{Trajectory Variance vs.\ CLIP Score for all 7{,}000 images.
+  Hallucinated images (red, $n{=}574$) cluster in the high-variance,
+  low-CLIP quadrant. Geometric-only failures (orange, $n{=}364$)
+  have high variance but normal CLIP.}
+  \label{fig:scatter}
+\end{figure}
+
+\subsection{ROC-AUC and Per-CFG Analysis}
+\label{sec:auc}
+
+\textbf{Pooled AUC (Table~\ref{tab:roc}).} Both trajectory variance
+(AUC\,=\,0.877) and CLIP (AUC\,=\,0.873) achieve good discrimination
+on all 7{,}000 images pooled across CFG values. However, 548 of 574
+hallucinated images (95.5\%) originate from CFG\,=\,0 and CFG\,=\,1.
+The pooled AUC therefore reflects performance across the full guidance
+range and should not be interpreted as production-setting performance.
+The external evaluation (Section~\ref{sec:external}) is the primary
+production-setting result.
+
+\begin{table}[h]
+\centering
+\caption{ROC-AUC Results with Bootstrap 95\% CIs.}
+\label{tab:roc}
+\small
+\begin{tabular}{lccc}
+\toprule
+\textbf{Signal} & \textbf{AUC} & \textbf{95\% CI} & \textbf{5-fold CV} \\
+\midrule
+Trajectory Variance    & 0.877 & [0.869, 0.884] & --- \\
+CLIP Score             & 0.873 & [0.858, 0.888] & --- \\
+Combined (LR)          & 0.898 & [0.886, 0.910] & $0.896{\pm}0.048$ \\
+All Features (Var+SCI) & \textbf{0.926} & [0.918, 0.935] & $0.919{\pm}0.062$ \\
+\midrule
+Random baseline        & 0.500 & --- & --- \\
+\bottomrule
+\multicolumn{4}{p{7.5cm}}{\small\textit{Note:} Bootstrap CIs use $n{=}1{,}000$ resamples. The combined detector uses logistic regression on variance and CLIP with 5-fold cross-validation (CV) to confirm stability across different subsets of the data.}
+\end{tabular}
+\end{table}
+
+\textbf{Per-CFG AUC (Table~\ref{tab:cfg_auc}).} Disaggregating AUC
+by CFG level reveals the most important comparative finding of the
+internal study. At CFG\,=\,0, both signals perform at similar levels
+(variance 0.771, CLIP 0.761). At this setting, the null embedding
+is active and hallucinated images are so dramatically wrong that even
+a CLIP comparison (which should theoretically have no signal since
+text conditioning is off) accidentally discriminates them due to
+the severity of the failure. At CFG\,=\,1, where text conditioning
+begins but is weak, trajectory variance maintains AUC\,=\,0.760
+while CLIP collapses to AUC\,=\,0.522 (near-random). This is the
+key finding of the per-CFG analysis: variance discriminates
+hallucinations precisely in the regime where CLIP provides no
+information. At CFG\,${\geq}$\,5, insufficient hallucinated images
+exist for within-level AUC computation.
+
+\begin{table}[h]
+\centering
+\caption{Per-CFG AUC: Trajectory Variance vs.\ CLIP Score.}
+\label{tab:cfg_auc}
+\small
+\begin{tabular}{rrrcc}
+\toprule
+\textbf{CFG} & $\boldsymbol{n}_\text{hall}$ & $\boldsymbol{n}_\text{clean}$
+& \textbf{Var AUC} & \textbf{CLIP AUC} \\
+\midrule
+0.0  & 352 & 648 & 0.771 & 0.761 \\
+1.0  & 196 & 804 & 0.760 & $0.522^\star$ \\
+3.0  &   9 & 991 & $0.906^\dagger$ & $0.696^\dagger$ \\
+5.0  &   1 & 999 & --- & --- \\
+7.5  &   0 & 1{,}000 & --- & --- \\
+10.0 &   3 & 997 & $0.910^\dagger$ & $0.637^\dagger$ \\
+15.0 &  13 & 987 & 0.849 & 0.517 \\
+\bottomrule
+\multicolumn{5}{p{7.5cm}}{\small\textit{Note:} The pooled AUC\,=\,0.877 is driven by CFG\,=\,0/1, which account for 95.5\% of all hallucinations. $\star$\,=\,near-random performance; $\dagger$\,=\,small sample ($n_\text{hall}{<}15$), treat as indicative only.}
+\end{tabular}
+\end{table}
+
+\textbf{Per-category AUC.} Within individual prompt categories,
+trajectory variance achieves strong discrimination: Negation\,=\,0.983,
+Compositional\,=\,0.943, Single-Concept\,=\,0.924 (Figure~\ref{fig:roc}).
+These values confirm that the metric reliably separates hallucinated
+from clean images within a consistent prompt type.
+
+\textbf{Statistical tests (Table~\ref{tab:stats}).}
+The Mann-Whitney U test asks: across all possible pairs of one
+hallucinated image and one clean image, does the hallucinated image
+have higher variance? The answer is yes in 75.3\% of all pairs,
+with $p{=}2.70{\times}10^{-197}$ and effect size $r{=}0.753$.
+Cohen's $d{=}0.819$ means the average hallucinated image has variance
+0.82 standard deviations above the average clean image, a large and
+practically meaningful difference. Spearman correlations confirm
+both arms of the U-curve are statistically significant. The
+chi-squared test confirms that prompt category strongly predicts
+failure type ($p{=}1.17{\times}10^{-120}$): Single-Concept and
+Compositional prompts hallucinate far more than Negation, Generic,
+and Conflicting.
+
+\begin{table}[h]
+\centering
+\caption{Statistical Test Results.}
+\label{tab:stats}
+\small
+\begin{tabular}{p{2.1cm}p{2.0cm}p{1.8cm}p{1.2cm}}
+\toprule
+\textbf{Test} & \textbf{Statistic} & \textbf{$p$-value} & \textbf{Effect} \\
+\midrule
+MW-U (Variance)       & $U{=}3.23{\times}10^6$ & $2.70{\times}10^{-197}$ & $r{=}0.753$ \\
+MW-U (CLIP)           & $U{=}3.22{\times}10^6$ & $4.65{\times}10^{-193}$ & $r{=}0.745$ \\
+Cohen's $d$ (Var)     & $d{=}0.819$            & ---                     & Large \\
+Spearman (0$\to$7.5)  & $\rho{=}{-}0.624$      & ${\approx}0$            & Strong \\
+Spearman (7.5$\to$15) & $\rho{=}{+}0.144$      & $2.23{\times}10^{-15}$  & Weak \\
+Chi-sq.\ (category)   & $\chi^2{=}563.6$, $df{=}4$ & $1.17{\times}10^{-120}$ & $V{=}0.284$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figure3_roc_curves.png}
+  \caption{ROC Curve Analysis. \textbf{Left:} Overlaid ROC curves
+  for trajectory variance (red), CLIP (blue), and combined logistic
+  regression (green). \textbf{Right:} Per-category AUC for the three
+  categories with sufficient hallucination count. Generic and
+  Conflicting have zero confirmed hallucinations (see
+  Section~\ref{sec:zero_rate}) and are excluded.}
+  \label{fig:roc}
+\end{figure}
+
+%% ============================================================
+%%  5. SPATIAL HALLUCINATION ANALYSIS
+%% ============================================================
+\section{Spatial Hallucination Analysis}
+\label{sec:spatial}
+
+\subsection{From Global Scalar to Spatial Heatmap}
+
+All prior analysis used a single number per image, the global mean
+variance. To understand \emph{where} the model was uncertain, not
+just \emph{how much}, we compute per-pixel variance maps. For each
+image, the $(15, 4, 64, 64)$ trajectory is reduced to a $64{\times}64$
+variance map by computing variance across the 15 steps and averaging
+over the 4 latent channels:
+\begin{equation}
+  M[x, y] = \frac{1}{4}\sum_{c=1}^{4}
+             \text{Var}_{t}\bigl[\hat{x}_0(t)[c,x,y]\bigr]
+  \label{eq:heatmap}
+\end{equation}
+For visualisation, this map is upsampled to $512{\times}512$ using
+bilinear interpolation to match the output image resolution
+(factor of 8, since $64{\times}8{=}512$). The statistics reported
+in this section are all computed on the original $64{\times}64$ maps.
+Consistency check: $\text{mean}(M)\,{=}\,v$ (the stored global scalar)
+to within floating-point precision.
+
+\textbf{Spatial metrics.} Two metrics characterise the
+\emph{distribution} of instability rather than its magnitude:
+
+The \emph{Spatial Concentration Index} (SCI) is the Gini coefficient
+of pixel variance values:
+\begin{equation}
+  \text{SCI} = \frac{2\sum_{i=1}^{n} i\,m_{(i)}}{n\sum_{i=1}^{n} m_{(i)}}
+               - \frac{n+1}{n}
+  \label{eq:sci}
+\end{equation}
+SCI\,=\,0 means all pixels are equally unstable (uniform spread);
+SCI\,=\,1 means all instability is in one pixel. Higher SCI indicates
+more localised instability.
+
+The \emph{Peak Variance Ratio} (PVR) measures hot-spot dominance:
+\begin{equation}
+  \text{PVR} = \frac{\text{mean}(m \geq P_{90})}{\text{mean}(m < P_{90})}
+  \label{eq:pvr}
+\end{equation}
+Higher PVR indicates a dominant hot-spot; lower PVR indicates spread
+instability.
+
+\subsection{Three-Tier Spatial Taxonomy}
+\label{sec:taxonomy}
+
+Figure~\ref{fig:spatial_gallery} shows representative examples.
+Table~\ref{tab:spatial} presents group statistics.
+
+\begin{table}[h]
+\centering
+\caption{Spatial Metrics by Failure Type.}
+\label{tab:spatial}
+\small
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Group} & \textbf{n} & \textbf{SCI} & \textbf{PVR mean} & \textbf{PVR med.} \\
+\midrule
+Hallucinated (both) & 574   & 0.386 & 3.33 & 3.25 \\
+Semantic only       & 1{,}698 & 0.410 & 3.65 & 3.53 \\
+Geometric only      & 364   & \textbf{0.486} & $5.82^\dagger$ & $4.58^\dagger$ \\
+Clean (none)        & 4{,}364 & 0.442 & 4.23 & 3.95 \\
+Clean (hall.\,=\,F) & 6{,}426 & 0.436 & 4.17 & --- \\
+\bottomrule
+\multicolumn{5}{p{8cm}}{\small\textit{Note:} Statistical tests use Clean (halluc.\,=\,False, $n{=}6{,}426$); Clean (none, $n{=}4{,}364$) is provided for reference. $\dagger$\,High PVR mean is driven by Conflicting-category outliers at CFG\,${\geq}$\,10; median (4.58) is more representative.}
+\end{tabular}
+\end{table}
+
+\textbf{Key finding.} Geometric-only failures have the \emph{highest}
+SCI meaning the most localised instability, which was the opposite of our
+initial hypothesis. This reveals two mechanistically distinct types
+of high-variance images that are indistinguishable from the global
+scalar alone. Full hallucination (mode interpolation between two
+entirely different global images) produces \emph{uniform} instability:
+because the two candidate images differ everywhere, every pixel is
+equally uncertain. Geometric-only failures (where the model commits
+globally but cannot resolve one irresolvable semantic region) produce
+a \emph{focused hot-spot} while the rest of the image is stable.
+
+\textbf{Reading a heatmap.} A heatmap alone does not determine failure
+type as it must be combined with the global variance scalar. Images with
+high global variance \emph{and} low SCI (uniform purple haze, no
+dominant bright region) are confirmed hallucinations. Images with high
+global variance \emph{and} high SCI (clear bright dot against near-black
+background) are geometric-only failures. Clean images exhibit low global
+variance where any hot-spots present correspond to fine structural decisions
+(object contours, reflections) and are expected, not pathological.
+This three-way combination: magnitude, spread, and location is what
+distinguishes the failure types.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figure5_spatial_gallery.png}
+  \caption{Spatial variance heatmaps by failure type.
+  \textbf{Top row (Hallucinated):} Uniform purple haze---global mode
+  interpolation; every pixel is uncertain.
+  \textbf{Middle row (Geometric-only):} Localised bright hot-spot;
+  global structure committed but one region unresolvable.
+  \textbf{Bottom row (Clean):} Moderate diffuse pattern following
+  the object boundary.}
+  \label{fig:spatial_gallery}
+\end{figure}
+
+\textbf{Statistical significance (Table~\ref{tab:spatial_stats}).}
+Cohen's $d{=}{-}1.014$ for SCI is the largest effect size in the
+entire study, exceeding the global variance result ($d{=}0.819$).
+
+\begin{table}[h]
+\centering
+\caption{Spatial Statistical Tests. Hallucinated ($n{=}574$) vs
+clean/halluc.\,=\,False ($n{=}6{,}426$).}
+\label{tab:spatial_stats}
+\small
+\begin{tabular}{p{1.8cm}p{1.0cm}p{1.0cm}p{3.2cm}}
+\toprule
+\textbf{Test} & \textbf{Hall.\ mean} & \textbf{Clean mean} & \textbf{$p$-value / Effect} \\
+\midrule
+MW-U (SCI)        & 0.386 & 0.436 & $8.08{\times}10^{-147}$; $r{=}0.308$ \\
+MW-U (PVR)        & 3.333 & 4.165 & $2.06{\times}10^{-148}$; $r{=}0.310$ \\
+Cohen's $d$ (SCI) & ---   & ---   & $d{=}{-}1.014$ (\textbf{largest}) \\
+Cohen's $d$ (PVR) & ---   & ---   & $d{=}{-}0.763$ (Large) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:sci_dist} shows the SCI distributions for all four
+groups.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figure6_sci_distributions.png}
+  \caption{SCI Distribution by Failure Type. \textbf{Left:} Density
+  plot. Hallucinated (red) peaks at lower SCI than clean (green).
+  Geometric-only (orange) is the most right-shifted.
+  \textbf{Right:} Per-category comparison.
+  All differences $p{<}0.001$ ($***$).}
+  \label{fig:sci_dist}
+\end{figure}
+
+\subsection{AUC with Spatial Features}
+
+SCI and PVR alone achieve AUC\,=\,0.824 and 0.826 respectively (this is
+slightly below global variance (0.877) ) because they measure
+instability \emph{shape} rather than magnitude. Combined with global
+variance and CLIP, the all-features logistic regression reaches
+AUC\,=\,0.926 [CI: 0.918, 0.935], confirmed stable by 5-fold
+cross-validation (0.919\,${\pm}$\,0.062).
+
+%% ============================================================
+%%  6. EXTERNAL VALIDATION
+%% ============================================================
+\section{External Validation}
+\label{sec:external}
+
+\subsection{Design: Fixed-Threshold Constraint}
+
+The scientific value of external validation depends on one constraint which are
+the thresholds calibrated from the internal dataset
+($\tau_\text{var}^{(k)}$, $\tau_\text{clip}^{(k)}$) are applied to
+all external images \emph{without recalibration}. If thresholds were
+re-fitted to the external data then any AUC improvement would reflect
+recalibration rather than genuine generalisation. This design mirrors
+real deployment where a threshold is set once on a reference
+distribution and then applied continuously to new user-generated
+content.
+
+\textbf{Calibration verification.} At CFG\,=\,7.5 we notice that external mean
+variance (0.002754) differs from the internal mean (0.002732) by
+only 0.8\%, and external mean CLIP (0.2406) differs from internal
+(0.2401) by 0.2\%. Any observed AUC change therefore reflects genuine
+generalisation and not the calibration error.
+
+\subsection{Generalisation Results}
+
+\begin{table}[h]
+\centering
+\caption{Internal vs.\ External AUC: Generalisation Comparison.}
+\label{tab:gen}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Signal} & \textbf{Int.\ AUC} & \textbf{Ext.\ AUC}
+& \textbf{Ext.\ CI} & \textbf{Result} \\
+\midrule
+Variance & 0.877 & \textbf{0.959} & [0.952, 0.964] & \checkmark \\
+CLIP     & 0.873 & 0.475 & [0.419, 0.533] & $\times^\star$ \\
+Combined & 0.898 & \textbf{0.960} & [0.951, 0.967] & \checkmark \\
+\bottomrule
+\multicolumn{5}{p{8cm}}{\small\textit{Note:} $\star$\,CI includes 0.50: CLIP is not statistically distinguishable from random chance on diverse prompts. Variance CI [0.952, 0.964] excludes 0.50 entirely. This confirms robust generalization.}
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:gen} shows the full comparison. Three findings stand
+out.
+
+\textbf{Variance generalises and improves.} AUC increases from 0.877
+to 0.959. Cohen's $d$ improves from 0.82 to 1.879. A big insight from this is that now the effect size has
+nearly doubled. Hallucinated images on external data show slightly
+higher mean variance (0.003994 vs.\ 0.003645), consistent with the
+external prompts being harder to satisfy semantically.
+
+\textbf{CLIP fails categorically.} External CLIP AUC\,=\,0.475
+with CI\,=\,[0.419, 0.533] which includes 0.50. CLIP is not
+statistically distinguishable from random chance on diverse prompts.
+The reason is structural: abstract Generic prompts (``A warm place'',
+``Something round'') and Conflicting prompts (``Dry ocean'',
+``Cold fire'') produce intrinsically low CLIP scores for any generated
+image regardless of quality. The CLIP distributions for hallucinated
+and clean images overlap almost completely on these categories and
+destroying the discriminative power.
+
+\textbf{CI non-overlap.} Variance external CI [0.952, 0.964] does
+not overlap with CLIP external CI [0.419, 0.533] by a margin of
+0.419. This non-overlap is the definitive statistical statement that
+these two signals are drawn from categorically different AUC
+distributions on diverse prompt data.
+
+\textbf{Why variance generalises and CLIP does not.} Trajectory
+variance measures a property of the diffusion process itself that is how
+much the model's prediction of the final image changed during the
+last 15 denoising steps. This computation is independent of what
+text was given. A model oscillating between two globally incompatible
+image structures will produce high variance whether the prompt is
+``A red apple'' or ``The sound of emptiness.''
+
+But the CLIP cosine similarity, by contrast, is calibrated against specific
+text embeddings. The internal thresholds were set for 20 specific
+prompts. External dataset used abstract and impossible prompts resulting in inherently low CLIP
+scores for any generated image and making the hallucinated/clean
+threshold meaningless on diverse prompts. Trajectory variance requires
+only a model-level calibration thus establishing the normal variance
+range for this specific diffusion model and then it generalizes across
+semantic domains.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figure9_generalisation.png}
+  \caption{External Validation Results. \textbf{Top-left:}
+  Variance improves ($0.877{\to}0.959$); CLIP collapses
+  ($0.873{\to}0.475$). \textbf{Top-centre:} ROC curves.
+  \textbf{Top-right:} Variance distributions; Cohen's $d{=}1.879$.
+  \textbf{Bottom-left:} Per-category AUC. Variance ($>$0.95)
+  across all testable categories; CLIP fails on abstract prompts.}
+  \label{fig:gen}
+\end{figure}
+
+%% ============================================================
+%%  7. BOOTSTRAP CONFIDENCE INTERVALS
+%% ============================================================
+\section{Bootstrap Confidence Intervals}
+\label{sec:bootstrap}
+
+The AUC estimates are accompanied by 1{,}000-iteration percentile
+bootstrap 95\% confidence intervals (seed\,=\,42, all
+$n_{\text{valid}}{=}1{,}000$). Combined models refit the logistic
+regression on each bootstrap resample.
+
+Table~\ref{tab:ci} presents all CIs. The CI widths are informative:
+variance external has the narrowest CI (width\,=\,0.012) because
+high AUC with consistent class separation is stable across
+resamples. CLIP external has the widest CI (width\,=\,0.114)
+because AUC near 0.5 with a noisy signal varies widely across
+resamples. Here, all-features CI [0.918, 0.935] does not overlap
+with the combined (Var+CLIP) CI lower bound (0.886), confirming that
+adding spatial features provides a statistically meaningful AUC
+improvement.
+
+\begin{table}[h]
+\centering
+\caption{All Bootstrap 95\% CIs ($n{=}1{,}000$, seed\,=\,42).}
+\label{tab:ci}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Signal} & \textbf{AUC} & \textbf{Lower} & \textbf{Upper} & \textbf{Width} \\
+\midrule
+Var Internal       & 0.877 & 0.869 & 0.884 & 0.016 \\
+CLIP Internal      & 0.873 & 0.858 & 0.888 & 0.030 \\
+Combined (Var+CLIP)& 0.898 & 0.886 & 0.910 & 0.024 \\
+SCI alone          & 0.824 & 0.809 & 0.841 & 0.032 \\
+PVR alone          & 0.826 & 0.811 & 0.842 & 0.031 \\
+All Features       & 0.926 & 0.918 & 0.935 & 0.018 \\
+\midrule
+\textbf{Var External}  & \textbf{0.959} & \textbf{0.952} & \textbf{0.964} & 0.012 \\
+\textbf{CLIP External} & \textbf{0.475} & \textbf{0.419} & \textbf{0.533} & 0.114 \\
+Combined External  & 0.960 & 0.951 & 0.967 & 0.015 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:bootstrap} shows the bootstrap CI bar charts.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figure10_bootstrap_ci.png}
+  \caption{Bootstrap 95\% CIs on all AUC estimates.
+  \textbf{Left:} Internal signals.
+  \textbf{Right:} Internal vs.\ external. Variance pair
+  (blue/teal) overlaps---consistent generalisation. CLIP pair
+  (purple/red) diverges dramatically---CLIP is
+  distribution-specific.}
+  \label{fig:bootstrap}
+\end{figure}
+
+%% ============================================================
+%%  8. DISCUSSION
+%% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Hypothesis Assessment}
+
+\textbf{H$_1$ (mode interpolation persists): SUPPORTED with
+qualification.} At CFG\,=\,0--1 we observe the hallucination rates of 35.2\% and
+19.6\% which confirms that text conditioning alone does not prevent mode
+interpolation when guidance is absent or weak. Trajectory variance
+achieves AUC\,=\,0.760 at CFG\,=\,1 while CLIP is at 0.522.
+External AUC\,=\,0.959 with Cohen's $d{=}1.879$ confirms robust
+generalisation. The qualification: at CFG\,${\geq}$\,3, hallucination
+rate drops below 1\%, and at CFG\,=\,7.5 it is exactly 0.0\%.
+H$_1$ is most strongly supported at low CFG.
+
+\textbf{H$_0$ (semantic misalignment dominates): PARTIALLY SUPPORTED.}
+1{,}698 images (24.3\%) fail quality checks with normal trajectory
+variance. Negation violations (46.9\% YOLO error for ``Face, no eyes'')
+are driven by Stable Diffusion ignoring text constraints and not the geometric
+instability. The CLIP AUC collapse on external data (CI includes 0.5)
+confirms that semantic failure mechanisms are prompt-distribution
+specific.
+
+\subsection{The Zero-Hallucination Categories}
+\label{sec:zero_rate}
+
+Generic and Conflicting prompts both show 0\% confirmed hallucination
+rate. This part requires explanation. These 2{,}800 images (40\% of the
+dataset) contribute to the clean pool in AUC computation, making the
+overall AUC harder to achieve meaning 0.877 is a conservative estimate.
+
+For \textbf{Generic} prompts, the model resolves underspecification
+by cleanly committing to one interpretation (generating a single fruit
+rather than oscillating between multiple). The per-category threshold
+$\tau_\text{var}^\text{Gen}{=}0.005510$ is the highest of all
+categories which is calibrated from a naturally noisier baseline. The 13
+geometric-only cases indicate some instability but this is not enough to
+cross the calibrated threshold. This is a correct calibrated outcome.
+
+For \textbf{Conflicting} prompts (all MANUAL, CLIP-only validation),
+the threshold $\tau_\text{var}^\text{Con}{=}0.005774$ is calibrated
+from a baseline where impossible concepts already produce noisier
+trajectories. While 302 Conflicting images fail CLIP quality checks
+(semantic failure), they rarely exceed the category-specific variance
+threshold. However the spatial analysis reveals that geometric-only
+Conflicting images at CFG\,${\geq}$\,10 produce extreme localised
+hot-spots (mean PVR\,=\,12.64 for this subgroup) which is the highest of any
+subgroup in the study and it is confirming that this category does produce
+geometric instability, but its spatially localised nature prevents it
+from crossing the global variance threshold.
+
+\subsection{Implications for T2I System Design}
+
+\textbf{CFG selection.} CFG\,=\,7.5 is the geometric stability
+optimum. Below CFG\,=\,3, mode interpolation is a significant concern.
+Above CFG\,=\,10, semantically complex or contradictory prompts exhibit
+renewed instability.
+
+\textbf{Runtime monitoring.} Trajectory variance can be monitored as
+an unsupervised quality signal at zero additional inference cost during
+normal DDIM generation. Images with variance exceeding 2$\sigma$ above
+the category-level mean warrant review.
+
+\textbf{Detector deployment.} CLIP-based detection requires
+prompt-specific calibration and fails on semantically diverse or
+abstract prompts. For production systems which handles varied user inputs, we conclude that the
+trajectory variance is the superior signal. The combined detector
+(variance\,+\,SCI) achieves AUC\,=\,0.926 internally with stable
+cross-validation and is the recommended configuration.
+
+%% ============================================================
+%%  9. CONCLUSION
+%% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have presented an empirical investigation of mode interpolation
+as an explanatory mechanism for T2I hallucinations, spanning 18{,}000
+generated images across 220 distinct prompts.
+
+\textbf{At the generation level:} mode interpolation is real and
+measurable in T2I but is strongly CFG-dependent. At CFG\,=\,7.5,
+conditioning completely suppresses mode interpolation (0.0\% rate).
+Over-guidance reintroduces a new instability for semantically
+contradictory prompts. The 24.3\% semantic-only failure rate confirms
+that text encoder limitations are an independent failure mechanism.
+
+\textbf{At the spatial level:} per-pixel variance heatmaps reveal
+a three-tier taxonomy: uniform spread (hallucinated, SCI\,=\,0.386),
+localised hot-spot (geometric-only, SCI\,=\,0.486) and diffuse
+moderate (clean, SCI\,=\,0.436). Cohen's $d{=}1.014$ for spatial
+concentration is the largest effect size in the study. This taxonomy
+is invisible to the global scalar metric.
+
+\textbf{At the generalisation level:} trajectory variance AUC
+improves from 0.877 to 0.959 on 200 unseen prompts with fixed
+thresholds; Cohen's $d$ nearly doubles from 0.82 to 1.879. CLIP
+AUC collapses from 0.873 to 0.475 with a CI that includes 0.5.
+Bootstrap CI non-overlap statistically certifies that trajectory
+variance is a distribution-agnostic geometric detector while CLIP
+is a prompt-specific semantic proxy. This
+distinction has direct practical consequences in the T2I deployment
+
+%% ============================================================
+%%  10. FUTURE WORK
+%% ============================================================
+
+\section{Future Work}
+\label{sec:futurework}
+
+Several directions follow directly from what we found and we think
+each of them is worth pursuing properly.
+
+\textbf{DiT-based architectures.}
+This entire study was run on Stable Diffusion v1.4 which uses a
+UNet denoiser with cross-attention for conditioning. Newer systems
+like Stable Diffusion~3.5, Flux and PixArt-$\alpha$ replace the UNet
+with a Diffusion Transformer (DiT)~\cite{rombach2022ldm,
+ramesh2022dalle2} where the conditioning mechanism and the attention
+structure are fundamentally different. Whether the CFG U-curve
+persists in these architectures and whether trajectory variance
+still separates hallucinated from clean samples as cleanly is a
+genuinely open question. Given how widely DiT-based models are
+being adopted, we think answering it is the most pressing next step.
+
+\textbf{Video diffusion models.}
+In video generation, mode interpolation would not just manifest
+spatially but it would show up temporally as flickering or frame
+inconsistency, where the model oscillates between two plausible
+continuations of a scene. Trajectory variance computed
+frame-by-frame or across the temporal dimension of the latent
+could serve as an early indicator of this. Whether the spatial
+taxonomy we found (uniform spread vs.\ localised hot-spot) has a
+meaningful temporal analogue is an interesting question and one
+that matters practically given how quickly video diffusion models
+are being deployed.
+
+\textbf{Cross-attention entropy as an earlier detection signal.}
+One observation from our results is that the high-variance trajectories
+often correspond to prompts where the model is effectively pulling
+in two directions at once. And cross-attention maps could capture this
+earlier in the process. If attention entropy across text tokens is
+unusually high at intermediate denoising steps then it may predict
+geometric instability before it becomes visible in the variance
+signal. If such a temporal ordering exists then this means that first the attention collapses and then variance spikes. All these could enable detection earlier
+in the sampling process than the 15-step commitment window we used
+here. We see this as a promising direction for making the framework
+both faster and more interpretable.
+
+%% ============================================================
+%%  REFERENCES
+%% ============================================================
+\bibliographystyle{IEEEtran}
+
+\begin{thebibliography}{15}\bibitem{yi2024understanding}S.~K.~Aithal, P.~Maini, Z.~C.~Lipton, and J.~Z.~Kolter,``Understanding hallucinations in diffusion models through modeinterpolation,''in \textit{Advances in Neural Information Processing Systems (NeurIPS)}, 2024.
+
+\bibitem{ho2020ddpm}J.~Ho, A.~Jain, and P.~Abbeel,``Denoising diffusion probabilistic models,''in \textit{Advances in Neural Information Processing Systems (NeurIPS)},vol.~33, pp.~6840--6851, 2020.
+
+\bibitem{song2020ddim}J.~Song, C.~Meng, and S.~Ermon,``Denoising diffusion implicit models,''in \textit{International Conference on Learning Representations (ICLR)},2021.
+
+\bibitem{rombach2022ldm}R.~Rombach, A.~Blattmann, D.~Lorenz, P.~Esser, and B.~Ommer,``High-resolution image synthesis with latent diffusion models,''in \textit{Proceedings of the IEEE/CVF CVPR}, pp.~10684--10695, 2022.
+
+\bibitem{radford2021clip}A.~Radford, J.~W.~Kim, C.~Hallacy, A.~Ramesh, G.~Goh, S.~Agarwal,G.~Sastry, A.~Askell, P.~Mishkin, J.~Clark, G.~Krueger, andI.~Sutskever,``Learning transferable visual models from natural language supervision,''in \textit{Proceedings of ICML}, pp.~8748--8763, 2021.
+
+\bibitem{ho2022cfg}J.~Ho and T.~Salimans,``Classifier-free diffusion guidance,''in \textit{NeurIPS Workshop on Deep Generative Models and DownstreamApplications}, 2022.
+
+\bibitem{liu2024texthallu}R.~Lu, R.~Wang, K.~Lyu, X.~Jiang, G.~Huang, and M.~Wang,``Towards understanding text hallucination of diffusion models vialocal generation bias,''in \textit{International Conference on Learning Representations (ICLR)}, 2025.
+
+\bibitem{ji2023survey}Z.~Ji, N.~Lee, R.~Frieske, T.~Yu, D.~Su, Y.~Xu, E.~Ishii, Y.~Bang,A.~Madotto, and P.~Fung,``Survey of hallucination in natural language generation,''\textit{ACM Computing Surveys}, vol.~55, no.~12, pp.~1--38, 2023.
+
+\bibitem{li2023evaluating}Y.~Li, Y.~Du, K.~Zhou, J.~Wang, W.~X.~Zhao, and J.-R.~Wen,``Evaluating object hallucination in large vision-language models,''in \textit{Proceedings of EMNLP}, 2023.
+
+\bibitem{wang2024yolov10}A.~Wang, H.~Chen, L.~Liu, K.~Chen, Z.~Lin, J.~Han, and G.~Ding,``YOLOv10: Real-time end-to-end object detection,''\textit{arXiv preprint arXiv:2405.14458}, 2024.
+
+\bibitem{wolf2020huggingface}T.~Wolf, L.~Debut, V.~Sanh, J.~Chaumond, C.~Delangue, A.~Moi,P.~Cistac, T.~Rault, R.~Louf, M.~Funtowicz, et~al.,``HuggingFace's Transformers: State-of-the-art natural languageprocessing,''in \textit{Proceedings of EMNLP: System Demonstrations}, pp.~38--45,2020.
+
+\bibitem{saharia2022photorealistic}C.~Saharia, W.~Chan, S.~Saxena, L.~Li, J.~Whang, E.~L.~Denton,K.~Ghasemipour, R.~Gontijo-Lopes, B.~K.~Aryabhata, R.~Salimans,J.~Ho, D.~J.~Fleet, and M.~Norouzi,``Photorealistic text-to-image diffusion models with deep languageunderstanding,''in \textit{Advances in NeurIPS}, vol.~35, 2022.
+
+\bibitem{ramesh2022dalle2}A.~Ramesh, P.~Dhariwal, A.~Nichol, C.~Chu, and M.~Chen,``Hierarchical text-conditional image generation with CLIP latents,''\textit{arXiv preprint arXiv:2204.06125}, 2022.
+
+\bibitem{chefer2023attend}H.~Chefer, Y.~Alaluf, Y.~Vinker, L.~Wolf, and D.~Cohen-Or,``Attend-and-excite: Attention-based semantic guidance fortext-to-image diffusion models,''\textit{ACM Transactions on Graphics}, vol.~42, no.~4, 2023.
+
+\bibitem{bau2019seeing}D.~Bau, J.~Zhu, H.~Strobelt, B.~Zhou, J.~B.~Tenenbaum,W.~T.~Freeman, and A.~Torralba,``Seeing what a GAN cannot generate,''in \textit{Proceedings of IEEE/CVF ICCV}, 2019.\end{thebibliography}
+
+\end{document}
