@@ -539,7 +539,7 @@ If you use this research, please cite:
 ```bibtex
 @research{shukla2026hallucination,
   title={Understanding Hallucination in Diffusion Models through Mode Interpolation},
-  author={Shukla, Utkarsh},
+  author={Shukla, Utkarsh}, {Jaishetty, Hasini}
   year={2026},
   repository={Understanding-Hallucination-in-Text-to-Image-Diffusion-Models},
   organization={GitHub},
@@ -575,17 +575,6 @@ If you use this research, please cite:
 
 ---
 
-## 🙏 Acknowledgments
-
-This research represents a systematic, multi-phase investigation into fundamental challenges in generative AI. The work combines theoretical understanding (mode interpolation) with empirical validation (10,000 external images) and rigorous statistical analysis (bootstrap confidence intervals).
-
-**Special thanks to:**
-- OpenAI for CLIP model
-- CompVis for Stable Diffusion v1.4
-- Kaggle for GPU resources
-- The diffusers library community
-
----
 
 ## 📝 License
 
@@ -593,12 +582,3 @@ This project is made available for academic and research purposes. Please refer 
 
 ---
 
-## 📧 Contact & Questions
-
-For questions, suggestions, or collaboration inquiries:
-- **GitHub Issues:** Open an issue for bug reports or feature requests
-- **Repository:** [Shukla070/Understanding-Hallucination-in-Text-to-Image-Diffusion-Models](https://github.com/Shukla070/Understanding-Hallucination-in-Text-to-Image-Diffusion-Models)
-
----
-
-**Last Updated:** 2026 | **Project Duration:** Multi-year active research | **Current Status:** All 9 phases complete with comprehensive statistical validation
